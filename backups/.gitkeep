@@ -1,0 +1,2 @@
+Database snapshots land here, one folder per `qbxmigrate backup` run.
+Restore with: qbxmigrate restore <folder name> apply
