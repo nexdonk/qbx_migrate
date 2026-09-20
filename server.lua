@@ -95,6 +95,78 @@ local CONFIG = {
         -- currentapartment / fingerprint / walletid are intentionally absent:
         -- qbx_core generates them, and a null default would look like real data.
     },
+
+    -- ---------------------------------------------------------------------------------
+    -- IDENTITY RECONCILER  (server/identity.lua)
+    -- Qbox keys players by `license2:`. QBCore stored `license:`, ESX stored a bare
+    -- license hash, `charN:hash`, or steam/fivem/discord. license2 cannot be derived
+    -- offline, so on every connect the reconciler looks the joining player's rows up by
+    -- ANY of their identifiers and rewrites the stored value to license2, before
+    -- qbx_core loads their characters. Runs once per row; a no-op afterwards.
+    -- ---------------------------------------------------------------------------------
+    identity = {
+        enabled = true,
+        -- Every (table, column) that stores a Rockstar/steam identifier and should be
+        -- moved to license2. Missing tables/columns are skipped silently.
+        columns = {
+            { table = 'players',         column = 'license' },
+            { table = 'bans',            column = 'license' },
+            { table = 'player_vehicles', column = 'license' },
+        },
+        -- Print one console line per rewritten row.
+        verbose = true,
+    },
+
+    -- ---------------------------------------------------------------------------------
+    -- ESX SOURCE  (server/esx.lua)  -  `qbxmigrate esx [apply]`
+    -- ---------------------------------------------------------------------------------
+    esx = {
+        -- ESX's `users` table collides with the `users` table qbx_core creates on
+        -- start (userId / license / license2). Applying the ESX step RENAMES ESX's
+        -- users table to this name first; nothing is dropped.
+        usersTable = 'esx_users',
+
+        -- What ESX's Config.Identifier was. 'auto' inspects the stored value:
+        -- 40 hex chars = license, 15 digits starting 1100 = steam, 17+ digits = discord,
+        -- short digits = fivem. Set it explicitly if `qbxmigrate esx` reports guesses.
+        identifierType = 'auto',
+        -- esx_multicharacter Config.Prefix
+        charPrefix = 'char',
+
+        -- esx_identity Config.DateFormat. 'DMY' for DD/MM/YYYY, 'MDY' for MM/DD/YYYY.
+        dateFormat = 'DMY',
+
+        -- Default nationality written into charinfo (ESX has no such field).
+        nationality = 'USA',
+
+        -- ESX inventory weights are in whole units where Config.MaxWeight ~= 24.
+        -- ox_inventory weights are grams; the ox ESX bridge multiplies by 1000.
+        itemWeightMultiplier = 1000,
+
+        -- Extra model names for hash -> spawn name resolution of owned_vehicles.
+        -- Base-game names come from data/vehicle_models.lua, qbx_core/shared/vehicles.lua
+        -- and qb-core/shared/vehicles.lua are read too when present on disk.
+        vehicleModels = {},
+
+        -- owned_vehicles rows whose owner is not a known ESX identifier (job / society
+        -- vehicles). true = insert with citizenid NULL, false = skip and list them.
+        keepOrphanVehicles = false,
+
+        -- Map ESX weapon component names to ox_inventory attachment items. Anything
+        -- not listed (or not defined by ox_inventory) is dropped and counted.
+        componentMap = {
+            flashlight     = 'at_flashlight',
+            suppressor     = 'at_suppressor',
+            grip           = 'at_grip',
+            scope          = 'at_scope',
+            scope_small    = 'at_scope_small',
+            scope_medium   = 'at_scope_medium',
+            scope_large    = 'at_scope_large',
+            compensator    = 'at_compensator',
+            luxury_finish  = 'at_skin_luxe',
+            -- clip_extended is resolved per weapon class (pistol / smg / rifle / shotgun)
+        },
+    },
 }
 
 -- =====================================================================================
@@ -235,10 +307,12 @@ local function migrationRan(id)
 end
 
 local function markMigration(id, rows, notes)
+    -- A nil in a positional parameter list truncates the list before it reaches
+    -- oxmysql, so the optional column is fed '' and NULLIF'd server-side.
     MySQL.query.await([[
-        INSERT INTO qbx_migrations (id, rows_affected, notes) VALUES (?, ?, ?)
+        INSERT INTO qbx_migrations (id, rows_affected, notes) VALUES (?, ?, NULLIF(?, ''))
         ON DUPLICATE KEY UPDATE rows_affected = VALUES(rows_affected), notes = VALUES(notes), ran_at = current_timestamp()
-    ]], { id, rows or 0, notes })
+    ]], { id, rows or 0, notes or '' })
 end
 
 -- =====================================================================================
@@ -277,10 +351,26 @@ local BACKUP_SPEC = {
     -- Read-only during migration, but snapshotted so a rollback has the originals.
     { table = CONFIG.unifiedTable, key = CONFIG.unifiedIdColumn,
       columns = { CONFIG.unifiedIdColumn, CONFIG.unifiedItemsColumn } },
+    -- ESX sources. Read-only during migration (the ESX step only ever INSERTs into the
+    -- qbx tables), snapshotted whole so a rollback has the originals. `users` is listed
+    -- twice because the ESX step renames it to CONFIG.esx.usersTable.
+    { table = 'users',                 key = 'identifier', all = true, esx = true },
+    { table = CONFIG.esx.usersTable,   key = 'identifier', all = true, esx = true },
+    { table = 'owned_vehicles',        key = 'plate',      all = true, esx = true },
+    { table = 'user_licenses',         key = 'id',         all = true, esx = true },
+    { table = 'addon_inventory_items', key = 'id',         all = true, esx = true },
+    { table = 'addon_account_data',    key = 'id',         all = true, esx = true },
+    { table = 'datastore_data',        key = 'id',         all = true, esx = true },
 }
 
 local function doBackup(report)
     local stamp = os.date('%Y%m%d_%H%M%S')
+    -- Two apply steps inside one second must not overwrite each other's snapshot.
+    local base, n = stamp, 1
+    while LoadResourceFile(RES, ('backups/%s/manifest.json'):format(stamp)) do
+        n = n + 1
+        stamp = ('%s_%d'):format(base, n)
+    end
     local manifest = { stamp = stamp, tables = {} }
 
     report:heading('Backup ' .. stamp)
@@ -288,10 +378,17 @@ local function doBackup(report)
     for _, spec in ipairs(BACKUP_SPEC) do
         if not tableExists(spec.table) then
             report:add('- skip `%s` (table not present)', spec.table)
+        elseif spec.esx and not (columnExists(spec.table, spec.key)) then
+            -- `users` exists but is qbx_core's registry (userId/license2), not ESX's.
+            report:add('- skip `%s` (not an ESX table)', spec.table)
         else
             local cols = {}
-            for _, c in ipairs(spec.columns) do
-                if columnExists(spec.table, c) then cols[#cols + 1] = ('`%s`'):format(c) end
+            if spec.all then
+                cols[1] = '*'
+            else
+                for _, c in ipairs(spec.columns) do
+                    if columnExists(spec.table, c) then cols[#cols + 1] = ('`%s`'):format(c) end
+                end
             end
             if #cols == 0 then
                 report:add('- skip `%s` (no matching columns)', spec.table)
@@ -337,6 +434,13 @@ local function doRestore(report, stamp, apply)
         end
 
         local mode = entry.mode or 'update'
+
+        -- The table may have been renamed/replaced since the snapshot (ESX `users`
+        -- becomes qbx_core's `users`). Never UPDATE a table whose key column is gone.
+        if tableExists(entry.name) and not columnExists(entry.name, entry.key) then
+            report:warn('`%s` no longer has a `%s` column - skipped (restore the ESX side with `qbxmigrate esx rollback apply`)', entry.name, entry.key)
+            goto continue
+        end
 
         if not apply then
             if mode == 'replace' then
@@ -677,6 +781,10 @@ local function stepItems(report, apply)
 
     local shared, err = loadQbShared('shared/items.lua')
     if not shared then
+        -- No qb-core on disk: an ESX server keeps its items in the `items` table.
+        if QBXM.HOOKS.esxItems and QBXM.HOOKS.esxDetected and QBXM.HOOKS.esxDetected() then
+            return QBXM.HOOKS.esxItems(report, apply)
+        end
         report:err('cannot read qb-core items: %s', tostring(err))
         return 0
     end
@@ -784,6 +892,12 @@ local function stepJobs(report, apply)
     report:heading('Jobs & Gangs' .. (apply and ' (WRITE FILES)' or ' (DRY RUN)'))
 
     local generated = 0
+
+    -- ESX keeps jobs in the `jobs` / `job_grades` tables, not in a shared file.
+    if not LoadResourceFile('qb-core', 'shared/jobs.lua')
+        and QBXM.HOOKS.esxJobs and QBXM.HOOKS.esxDetected and QBXM.HOOKS.esxDetected() then
+        return QBXM.HOOKS.esxJobs(report, apply)
+    end
 
     local sources = {
         { path = 'shared/jobs.lua',  field = 'Jobs',  outFile = 'output/jobs.lua',  header = 'qbx_core/shared/jobs.lua' },
@@ -952,7 +1066,9 @@ local function convertItemList(raw, ownerLabel, oxItems, maxSlots, maxWeight, re
     for _, v in pairs(decoded) do
         if type(v) == 'table' then
             sawAny = true
-            if v.count == nil or v.amount ~= nil then looksOx = false break end
+            -- `info` is the qb/qs metadata key; a slotted list carrying it is NOT ox
+            -- format even when it also happens to use `count` (qs-inventory on ESX).
+            if v.count == nil or v.amount ~= nil or v.info ~= nil or v.slot == nil then looksOx = false break end
         end
     end
     if sawAny and looksOx then
@@ -1075,6 +1191,11 @@ local function stepInventory(report, apply)
     report:add('- ox_inventory limits: %d slots, %d weight', maxSlots, maxWeight)
 
     local totalUpdates = 0
+
+    if not tableExists('players') then
+        report:warn('`players` table missing - skipped (ESX: run `qbxmigrate esx apply` first)')
+        return 0
+    end
 
     ---------------------------------------------------------------------------
     -- 1. players.inventory
@@ -1379,6 +1500,10 @@ end
 local function stepPhone(report, apply)
     report:heading('Phone numbers' .. (apply and ' (APPLY)' or ' (DRY RUN)'))
 
+    if not tableExists('players') then
+        report:warn('`players` table missing - nothing to backfill (ESX: run `qbxmigrate esx apply` first)')
+        return 0
+    end
     if not columnExists('players', 'phone_number') then
         report:warn('`players.phone_number` missing - run `qbxmigrate schema apply` first')
         return 0
@@ -1423,6 +1548,11 @@ end
 
 local function stepMetadata(report, apply)
     report:heading('Metadata defaults' .. (apply and ' (APPLY)' or ' (DRY RUN)'))
+
+    if not tableExists('players') then
+        report:warn('`players` table missing - skipped (ESX: run `qbxmigrate esx apply` first)')
+        return 0
+    end
 
     local rows = MySQL.query.await('SELECT citizenid, metadata FROM players') or {}
     report:add('- %d players', #rows)
@@ -1700,6 +1830,21 @@ local function stepCheck(report)
         report:warn('`player_groups` is empty. After qbx_core is installed and jobs.lua is in place, run `convertjobs` in the server console.')
     end
 
+    if not tableExists('players') then
+        if QBXM.HOOKS.esxDetected and QBXM.HOOKS.esxDetected() then
+            report:add('')
+            report:add('- ESX database detected (no `players` table yet). Run `qbxmigrate esx` for the ESX-specific report; the job / inventory audits below apply after `esx apply`.')
+        else
+            report:err('`players` table does not exist and no ESX `users` table was found. Wrong database?')
+        end
+        report:heading('Migrations already run')
+        ensureMigrationsTable()
+        for _, r in ipairs(MySQL.query.await('SELECT id, ran_at, rows_affected FROM qbx_migrations ORDER BY ran_at') or {}) do
+            report:add('- `%s` at %s (%d rows)', r.id, tostring(r.ran_at), r.rows_affected or 0)
+        end
+        return
+    end
+
     report:heading('Jobs & gangs in use')
     local jobs, gangs = getQbxGroups()
     if not jobs then
@@ -1777,17 +1922,25 @@ qbx_migrate commands (server console / ACE command.qbxmigrate)
   qbxmigrate check                 read-only audit; writes output/<stamp>_check.md
   qbxmigrate backup                snapshot every table this tool can touch
   qbxmigrate restore <stamp> apply restore from backups/<stamp>
+  qbxmigrate esx [apply]           ESX users/owned_vehicles/societies -> qbx players/
+                                   player_vehicles/ox_inventory (creates the qbx tables)
+  qbxmigrate esx rollback [apply]  remove everything the esx step inserted, rename
+                                   esx_users back to users
   qbxmigrate schema [apply]        add qbx/ox columns and tables (additive only)
-  qbxmigrate items [apply]         generate output/items.lua from qb-core
+  qbxmigrate items [apply]         generate output/items.lua from qb-core / ESX items
   qbxmigrate jobs [apply]          generate output/jobs.lua + output/gangs.lua
   qbxmigrate inventory [apply]     convert qb-inventory data to ox_inventory format
   qbxmigrate phone [apply]         backfill players.phone_number
   qbxmigrate metadata [apply]      add missing metadata keys (additive only)
-  qbxmigrate all [apply]           backup + schema + items + jobs + inventory + phone + metadata
+  qbxmigrate identity              report rows still keyed by a pre-Qbox identifier
+                                   (rewritten to license2 automatically on each login)
+  qbxmigrate all [apply]           backup + [esx] + schema + items + jobs + inventory + phone + metadata
 
 Without `apply` every step is a DRY RUN and writes only a report.
-Recommended order: inspect -> check -> backup -> schema apply -> items apply -> jobs apply
-                   -> (merge generated files, restart) -> check -> inventory apply
+QBCore order: inspect -> check -> backup -> schema apply -> items apply -> jobs apply
+              -> (merge generated files, restart) -> check -> inventory apply
+ESX order:    inspect -> check -> backup -> esx apply -> items apply -> jobs apply
+              -> (merge generated files, restart with qbx_core) -> check
 ]]
 
 local STEPS = {
@@ -1797,6 +1950,35 @@ local STEPS = {
     inventory = stepInventory,
     phone = stepPhone,
     metadata = stepMetadata,
+}
+
+-- Extra top-level commands registered by server/esx.lua and server/identity.lua.
+-- fn(report, arg2, arg3) -> nil. `report` is saved under the command name afterwards.
+local COMMANDS = {}
+
+-- Shared surface for the other server files. They load after this one (see
+-- fxmanifest) and register into STEPS / COMMANDS / HOOKS.
+QBXM = {
+    CONFIG = CONFIG,
+    STEPS = STEPS,
+    COMMANDS = COMMANDS,
+    HOOKS = {},                 -- esxDetected(), esxItems(report), esxJobs(report)
+    newReport = newReport,
+    tableExists = tableExists,
+    columnExists = columnExists,
+    rowCount = rowCount,
+    decodeMaybe = decodeMaybe,
+    encodeArray = encodeArray,
+    serialize = serialize,
+    convertItemList = convertItemList,
+    resetInvStats = resetStats,
+    invStats = function() return InvStats end,
+    getOxItems = getOxItems,
+    loadQbShared = loadQbShared,
+    markMigration = markMigration,
+    migrationRan = migrationRan,
+    doBackup = doBackup,
+    batchSize = CONFIG.batchSize,
 }
 
 local running = false
@@ -1850,17 +2032,32 @@ local function run(action, arg2, arg3)
             if not apply then stepInspect(report) end
             stepCheck(report)
             if apply then doBackup(report) end
+            -- An ESX database has no `players` table yet; the ESX step creates the qbx
+            -- tables and fills them, so it must run before every other write step.
+            local isEsx = QBXM.HOOKS.esxDetected and QBXM.HOOKS.esxDetected()
+            if isEsx and STEPS.esx then
+                STEPS.esx(report, apply)
+            end
             stepSchema(report, apply)
             stepItems(report, apply)
             stepJobs(report, apply)
             stepInventory(report, apply)
             stepPhone(report, apply)
             stepMetadata(report, apply)
+            if COMMANDS.identity then COMMANDS.identity(report) end
             report:heading('Done')
             if not apply then
                 report:add('DRY RUN - nothing was written. Review this report, then run `qbxmigrate all apply`.')
             end
             report:save('all')
+            return
+        end
+
+        local command = COMMANDS[action]
+        if command then
+            local report = newReport('qbx_migrate ' .. action)
+            command(report, arg2, arg3)
+            report:save(action)
             return
         end
 
@@ -1873,7 +2070,7 @@ local function run(action, arg2, arg3)
 
         local apply = arg2 == 'apply'
         local report = newReport('qbx_migrate ' .. action .. (apply and ' (APPLY)' or ' (DRY RUN)'))
-        if apply and action == 'inventory' then doBackup(report) end
+        if apply and (action == 'inventory' or action == 'esx') then doBackup(report) end
         step(report, apply)
         if not apply then
             report:add('')

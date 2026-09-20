@@ -113,6 +113,38 @@ $ResourceMap = [ordered]@{
     'qtarget'             = 'ox_target'
     'mysql-async'         = 'oxmysql'
     'ghmattimysql'        = 'oxmysql'
+    # ---- ESX (database conversion: qbxmigrate esx) ----
+    'es_extended'         = 'qbx_core  (DB: qbxmigrate esx apply; code: ESX.* calls have no bridge, see HIGH findings)'
+    'esx_multicharacter'  = 'qbx_core built-in multicharacter'
+    'esx_identity'        = 'qbx_core built-in character creation'
+    'esx_skin'            = 'illenium-appearance'
+    'skinchanger'         = 'illenium-appearance'
+    'esx_inventoryhud'    = 'ox_inventory'
+    'esx_menu_default'    = 'ox_lib lib.registerContext'
+    'esx_menu_dialog'     = 'ox_lib lib.inputDialog'
+    'esx_menu_list'       = 'ox_lib lib.registerContext'
+    'esx_society'         = 'qbx_management'
+    'esx_addonaccount'    = 'qbx_management / Renewed-Banking (balances: output/esx_society_funds.json)'
+    'esx_addoninventory'  = 'ox_inventory stashes (converted by qbxmigrate esx)'
+    'esx_datastore'       = 'ox_inventory stashes (converted by qbxmigrate esx)'
+    'esx_policejob'       = 'qbx_police'
+    'esx_ambulancejob'    = 'qbx_ambulancejob'
+    'esx_garage'          = 'qbx_garages'
+    'esx_vehicleshop'     = 'qbx_vehicleshop'
+    'esx_billing'         = 'qbx_smallresources / okokBilling (bills are NOT migrated)'
+    'esx_license'         = 'qbx_core metadata.licences (converted by qbxmigrate esx)'
+    'esx_status'          = 'qbx_core metadata hunger/thirst (converted by qbxmigrate esx)'
+    'esx_basicneeds'      = 'ox_inventory consumables'
+    'esx_weaponshop'      = 'ox_inventory shops'
+    'esx_shops'           = 'ox_inventory shops'
+    'esx_property'        = 'ps-housing / qbx_properties (NOT migrated)'
+    'esx_phone'           = 'npwd + qbx_npwd (or lb-phone / qs-smartphone)'
+    'esx_doorlock'        = 'ox_doorlock  (door data must be re-created)'
+    'esx_drugs'           = 'qbx_drugs'
+    'esx_taxijob'         = 'qbx_taxijob'
+    'esx_mechanicjob'     = 'qbx_mechanicjob (UNMAINTAINED) or a community mechanic'
+    'esx_joblisting'      = 'qbx_cityhall'
+    'esx_cityhall'        = 'qbx_cityhall'
 }
 
 # =====================================================================================
@@ -328,6 +360,53 @@ $Rules = @(
        Severity = 'MEDIUM'; Auto = $null
        Pattern = "['`"](AddMoney|RemoveMoney)['`"]\s*\)|\.Functions\.(AddMoney|RemoveMoney|SetMoney)\s*\("
        Note = 'Still works, but ox_inventory mirrors cash as a `money` item. Do not also add/remove a cash item or you will duplicate funds.' }
+
+    # ---------------------------------------------------------------- ESX (no bridge exists; every hit is manual)
+    @{ Id = 'esx.shared-object'
+       Severity = 'HIGH'; Auto = $null
+       Pattern = "exports\[?['`"]es_extended['`"]\]?[:.]getSharedObject|TriggerEvent\(\s*['`"]esx:getSharedObject['`"]"
+       Note = 'qbx_core has no ESX object. Replace with exports.qbx_core / ox_lib calls: ESX.GetPlayerFromId -> exports.qbx_core:GetPlayer(src), xPlayer.identifier -> player.PlayerData.citizenid.' }
+
+    @{ Id = 'esx.server-player'
+       Severity = 'HIGH'; Auto = $null
+       Pattern = 'ESX\.(GetPlayerFromId|GetPlayerFromIdentifier|GetExtendedPlayers|GetPlayers|RegisterUsableItem|RegisterServerCallback|UseItem|GetJobs|DoesJobExist|RefreshJobs|GetItems|GetItemLabel|SavePlayer|SavePlayers)\s*\('
+       Note = 'Server-side ESX API. qbx_core: GetPlayer(src) / GetPlayerByCitizenId / GetQBPlayers / GetJobs; usable items -> exports.ox_inventory usable item hooks or exports.qbx_core:CreateUseableItem; callbacks -> lib.callback.register.' }
+
+    @{ Id = 'esx.xplayer-methods'
+       Severity = 'HIGH'; Auto = $null
+       Pattern = 'xPlayer\.(getMoney|addMoney|removeMoney|setMoney|getAccount|addAccountMoney|removeAccountMoney|setAccountMoney|getInventoryItem|addInventoryItem|removeInventoryItem|setInventoryItem|getJob|setJob|getGroup|setGroup|getIdentifier|getName|getLoadout|addWeapon|removeWeapon|hasWeapon|getWeight|canCarryItem|showNotification|triggerEvent|getCoords|setCoords|kick|setName)\s*\('
+       Note = 'xPlayer methods. Money -> player.Functions.AddMoney/RemoveMoney/GetMoney("cash"|"bank"); items -> exports.ox_inventory:AddItem/RemoveItem/Search; job -> player.Functions.SetJob / player.PlayerData.job; identifier -> player.PlayerData.citizenid (license lives in PlayerData.license as license2).' }
+
+    @{ Id = 'esx.client-api'
+       Severity = 'HIGH'; Auto = $null
+       Pattern = 'ESX\.(GetPlayerData|PlayerData|ShowNotification|ShowHelpNotification|ShowAdvancedNotification|TriggerServerCallback|Game\.\w+|UI\.\w+|Streaming\.\w+|Scaleform\.\w+|IsPlayerLoaded|SetPlayerData|OpenContext|CloseContext|Progressbar|TextUI|HideUI)\b'
+       Note = 'Client-side ESX API. PlayerData -> exports.qbx_core:GetPlayerData() / QBX.PlayerData; notifications -> lib.notify; callbacks -> lib.callback.await; ESX.Game.* -> ox_lib (lib.requestModel, lib.getClosestVehicle, ...); ESX.Streaming.* -> lib.requestModel/lib.requestAnimDict.' }
+
+    @{ Id = 'esx.events'
+       Severity = 'HIGH'; Auto = $null
+       Pattern = "['`"]esx:(playerLoaded|playerLogout|setJob|onPlayerDeath|onPlayerSpawn|showNotification|getSharedObject|addInventoryItem|removeInventoryItem|playerDropped|setAccountMoney)['`"]"
+       Note = 'ESX events are never fired under qbx_core. Equivalents: QBCore:Client:OnPlayerLoaded / qbx_core:client:playerLoggedOut / QBCore:Client:OnJobUpdate / qbx_core:server:onGroupUpdate / ox_inventory:updateInventory.' }
+
+    @{ Id = 'esx.identifier-column'
+       Severity = 'HIGH'; Auto = $null
+       Pattern = "(FROM|UPDATE|INTO)\s+['`"]?(users|owned_vehicles|user_licenses|addon_account_data|addon_inventory_items|datastore_data|billing)['`"]?\b"
+       Note = 'SQL against an ESX table. After `qbxmigrate esx apply` the data lives in players / player_vehicles / ox_inventory keyed by citizenid, not identifier. `qbx_migrate_esx_map` maps old identifier -> citizenid for your own tables.' }
+
+    @{ Id = 'esx.identifier-field'
+       Severity = 'MEDIUM'; Auto = $null
+       Pattern = '\.identifier\b'
+       Note = 'ESX identifier field. In qbx the character key is PlayerData.citizenid; the account key is PlayerData.license (license2:...). Third-party tables keyed by identifier need a one-off UPDATE via qbx_migrate_esx_map.' }
+
+    @{ Id = 'esx.manifest-dependency'
+       Severity = 'MEDIUM'; Auto = $null
+       Pattern = "(dependenc(?:y|ies)\s*[\{\s]\s*)(['`"])es_extended\2"
+       Note = 'fxmanifest depends on es_extended. Remove or point at qbx_core once the ESX calls in this resource are converted.'
+       ManifestOnly = $true }
+
+    @{ Id = 'esx.shared-import'
+       Severity = 'HIGH'; Auto = $null
+       Pattern = '@es_extended/[\w/\.\-]+'
+       Note = 'Imports an es_extended file (imports.lua / locale.lua). Replace with @ox_lib/init.lua; ESX locale -> lib.locale().' }
 )
 
 # =====================================================================================
@@ -499,7 +578,9 @@ $conflicts = New-Object System.Collections.ArrayList
 $conflictPairs = @(
     @('qb-core', 'qbx_core'), @('qb-target', 'ox_target'), @('qb-inventory', 'ox_inventory'),
     @('qb-doorlock', 'ox_doorlock'), @('LegacyFuel', 'ox_fuel'), @('qb-fuel', 'ox_fuel'),
-    @('mysql-async', 'oxmysql'), @('qtarget', 'ox_target')
+    @('mysql-async', 'oxmysql'), @('qtarget', 'ox_target'),
+    @('es_extended', 'qbx_core'), @('es_extended', 'qb-core'), @('esx_multicharacter', 'qbx_core'),
+    @('esx_skin', 'illenium-appearance'), @('esx_inventoryhud', 'ox_inventory')
 )
 foreach ($pair in $conflictPairs) {
     if ($installedResources.ContainsKey($pair[0]) -and $installedResources.ContainsKey($pair[1])) {
