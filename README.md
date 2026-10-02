@@ -42,10 +42,13 @@ qbx_migrate/
 ├── server.lua                        shared helpers, QBCore steps, command dispatcher
 ├── server/
 │   ├── esx.lua                       ESX -> qbx database conversion + rollback
-│   └── identity.lua                  login-time license -> license2 reconciler
+│   ├── identity.lua                  login-time license -> license2 reconciler
+│   └── panel.lua                     HTTP bridge for the control panel (token + loopback only)
 ├── data/vehicle_models.lua           base-game spawn names (ESX vehicle hash resolution)
 ├── sql/01_qbx_schema.sql             additive QBCore schema changes, if you prefer raw SQL
 ├── tools/Convert-QbxResources.ps1    offline code auditor + safe rewriter (QB and ESX rules)
+├── panel/                            local web control panel (Panel.ps1 + index.html)
+├── run.bat                           starts the panel and opens it in your browser
 ├── shims/                            qb-menu / qb-input / progressbar on ox_lib
 └── tests/                            real-database test suite (see tests/README.md)
 ```
@@ -61,6 +64,31 @@ qbx_migrate/
 Keep it ensured after the migration: the identity reconciler needs to run on every login until
 your players have all come back once. Remove it whenever `qbxmigrate identity` reports nothing
 pending, or leave it — it costs one indexed query per connect.
+
+---
+
+## Control panel (no console needed)
+
+Double-click **`run.bat`** in the `qbx_migrate` folder. A small local web panel starts and opens in
+your browser; every step in the runbook below is a button there, with live output and the report
+rendered next to it. Keep the black window open while you use it; close it to stop the panel.
+
+- **Code audit / rewrites / code restore** run `tools\Convert-QbxResources.ps1` on your PC. The
+  resources folder and `server.cfg` are filled in automatically when the kit sits inside a server's
+  `resources` folder; change them under *Settings*.
+- **Database steps** are sent to the running server. `server/panel.lua` adds an endpoint at
+  `http://<server>:30120/qbx_migrate/` that only runs `qbxmigrate` commands, only answers requests
+  from the same machine, and requires a token. The token is generated on first start into
+  `panel_token.txt` and the panel reads it from there by itself.
+- Every **Apply** asks you to type `apply`, the same rule as the console.
+
+Server on another machine: copy `panel_token.txt` from the server into the panel's *Settings*, set
+the server address there, and add `set qbx_migrate_panel_remote true` to the server's `server.cfg`.
+`set qbx_migrate_panel false` turns the endpoint off; `set qbx_migrate_panel_token <value>` pins your
+own token.
+
+The panel listens on `http://localhost:7480/` (next free port if taken) and only accepts requests
+from its own page.
 
 ---
 

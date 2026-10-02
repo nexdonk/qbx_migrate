@@ -1,0 +1,849 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>qbx_migrate panel</title>
+<style>
+  :root {
+    --bg: #0e1014;
+    --surface: #151820;
+    --surface-2: #1b1f29;
+    --border: #262b37;
+    --text: #e4e7ee;
+    --muted: #8a92a3;
+    --faint: #5c6475;
+    --accent: #4fd1b0;
+    --accent-ink: #062a22;
+    --warn: #f2b84b;
+    --warn-ink: #2b1d00;
+    --danger: #f06a6a;
+    --ok: #5ccf8f;
+    --info: #79b8ff;
+    --mono: ui-monospace, "Cascadia Code", "Cascadia Mono", Consolas, "SF Mono", monospace;
+    --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 var(--sans);
+    display: grid; grid-template-rows: auto 1fr; overflow: hidden;
+  }
+  button, input { font: inherit; color: inherit; }
+  code, kbd { font-family: var(--mono); font-size: 0.92em; }
+  a { color: var(--accent); }
+
+  /* ---------- top bar ---------- */
+  header {
+    display: flex; align-items: center; gap: 16px;
+    padding: 10px 18px; border-bottom: 1px solid var(--border); background: var(--surface);
+  }
+  .brand { font-weight: 650; letter-spacing: .2px; display: flex; align-items: baseline; gap: 8px; }
+  .brand small { color: var(--muted); font-weight: 400; }
+  .spacer { flex: 1; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 4px 11px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--surface-2); font-size: 12.5px; color: var(--muted); white-space: nowrap;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+  .pill.on .dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(92,207,143,.15); }
+  .pill.off .dot { background: var(--danger); }
+  .pill.busy .dot { background: var(--warn); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+
+  /* ---------- layout ---------- */
+  .app { display: grid; grid-template-columns: 220px minmax(0, 1fr) minmax(0, 46%); min-height: 0; }
+  nav { border-right: 1px solid var(--border); padding: 14px 10px; overflow-y: auto; }
+  nav .group { color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: .8px; margin: 14px 10px 6px; }
+  nav button {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 7px 10px; border: 0; border-radius: 6px; background: none; text-align: left;
+    color: var(--muted); cursor: pointer;
+  }
+  nav button:hover { background: var(--surface-2); color: var(--text); }
+  nav button.active { background: var(--surface-2); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
+  nav .num {
+    width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--border);
+    display: grid; place-items: center; font-size: 11px; flex: none;
+  }
+  nav button.active .num { border-color: var(--accent); color: var(--accent); }
+
+  main { overflow-y: auto; padding: 22px 26px 60px; min-width: 0; }
+  main h1 { font-size: 20px; margin: 0 0 4px; font-weight: 650; }
+  main .lede { color: var(--muted); margin: 0 0 20px; max-width: 70ch; }
+  section[data-view] { display: none; }
+  section[data-view].shown { display: block; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px 16px; margin-bottom: 12px;
+  }
+  .card h3 { margin: 0 0 3px; font-size: 14.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .card p { margin: 0 0 10px; color: var(--muted); }
+  .card p:last-child { margin-bottom: 0; }
+  .cmd { font-family: var(--mono); font-size: 11.5px; color: var(--faint); font-weight: 400; }
+  .tag { font-size: 10.5px; padding: 1px 7px; border-radius: 4px; border: 1px solid var(--border); color: var(--muted); font-weight: 500; }
+  .tag.ro { color: var(--info); border-color: rgba(121,184,255,.35); }
+  .tag.wr { color: var(--warn); border-color: rgba(242,184,75,.35); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+  .btn {
+    padding: 6px 13px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface-2); cursor: pointer; font-size: 13px; white-space: nowrap;
+  }
+  .btn:hover:not(:disabled) { border-color: #3a4152; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .btn.apply { background: transparent; border-color: rgba(242,184,75,.5); color: var(--warn); }
+  .btn.apply:hover:not(:disabled) { background: rgba(242,184,75,.1); }
+  .btn.danger { background: transparent; border-color: rgba(240,106,106,.5); color: var(--danger); }
+  .btn.small { padding: 3px 9px; font-size: 12px; }
+
+  .note {
+    border-left: 3px solid var(--border); padding: 8px 12px; margin: 0 0 12px;
+    color: var(--muted); background: var(--surface); border-radius: 0 6px 6px 0;
+  }
+  .note.warn { border-color: var(--warn); }
+  .note.info { border-color: var(--info); }
+  .note b { color: var(--text); }
+  .divider { display: flex; align-items: center; gap: 10px; color: var(--faint); font-size: 12px; margin: 18px 0 12px; }
+  .divider::before, .divider::after { content: ""; height: 1px; background: var(--border); flex: 1; }
+
+  label.field { display: block; margin-bottom: 12px; }
+  label.field span { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 4px; }
+  label.field input {
+    width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--bg); font-family: var(--mono); font-size: 12.5px;
+  }
+  label.field input:focus { outline: none; border-color: var(--accent); }
+  label.field small { color: var(--faint); font-size: 12px; }
+  .check { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; cursor: pointer; }
+
+  table.list { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.list td { padding: 6px 4px; border-top: 1px solid var(--border); vertical-align: middle; }
+  table.list tr:first-child td { border-top: 0; }
+  table.list td.t { color: var(--faint); font-size: 12px; white-space: nowrap; }
+  table.list td.a { text-align: right; white-space: nowrap; }
+  table.list .name { font-family: var(--mono); font-size: 12.5px; word-break: break-all; }
+  .empty { color: var(--faint); font-size: 13px; padding: 4px 0; }
+
+  ol.steps { margin: 0; padding-left: 20px; color: var(--muted); }
+  ol.steps li { margin-bottom: 6px; }
+  ol.steps b { color: var(--text); font-weight: 600; }
+
+  /* ---------- output pane ---------- */
+  aside { border-left: 1px solid var(--border); display: grid; grid-template-rows: auto auto 1fr; min-height: 0; background: #0b0d11; }
+  .tabs { display: flex; gap: 2px; padding: 8px 10px 0; border-bottom: 1px solid var(--border); background: var(--surface); }
+  .tabs button {
+    padding: 7px 14px; border: 1px solid transparent; border-bottom: 0; border-radius: 6px 6px 0 0;
+    background: none; color: var(--muted); cursor: pointer; font-size: 13px; margin-bottom: -1px;
+  }
+  .tabs button.active { background: #0b0d11; border-color: var(--border); color: var(--text); }
+  .jobbar {
+    display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--border);
+    font-size: 12.5px; color: var(--muted); min-height: 38px;
+  }
+  .jobbar .title { font-family: var(--mono); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .status { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); flex: none; }
+  .status.running { color: var(--warn); border-color: rgba(242,184,75,.4); }
+  .status.done { color: var(--ok); border-color: rgba(92,207,143,.4); }
+  .status.failed { color: var(--danger); border-color: rgba(240,106,106,.4); }
+  .pane { overflow: auto; min-height: 0; }
+  #console {
+    margin: 0; padding: 12px 14px; font: 12px/1.55 var(--mono); white-space: pre-wrap; word-break: break-word;
+    color: #c9ced8;
+  }
+  #console .w { color: var(--warn); }
+  #console .e { color: var(--danger); }
+  #console .k { color: var(--ok); }
+  #console .h { color: var(--accent); font-weight: 600; }
+  #console .d { color: var(--faint); }
+  .placeholder { color: var(--faint); padding: 28px 18px; text-align: center; font-size: 13px; }
+
+  /* rendered markdown */
+  .md { padding: 14px 20px 40px; font-size: 13.5px; }
+  .md h1 { font-size: 18px; margin: 4px 0 10px; }
+  .md h2 { font-size: 15px; margin: 22px 0 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+  .md h3 { font-size: 14px; margin: 18px 0 6px; }
+  .md p { margin: 6px 0; }
+  .md ul, .md ol { margin: 4px 0; padding-left: 22px; }
+  .md li { margin: 2px 0; }
+  .md code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+  .md pre { background: var(--surface); border: 1px solid var(--border); padding: 10px 12px; border-radius: 6px; overflow: auto; }
+  .md pre code { background: none; padding: 0; }
+  .md .tbl { overflow-x: auto; margin: 8px 0; }
+  .md table { border-collapse: collapse; font-size: 12.5px; }
+  .md th, .md td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; vertical-align: top; }
+  .md th { background: var(--surface); }
+  .md strong { color: #fff; }
+  .md .warn-word { color: var(--warn); }
+  .md .err-word { color: var(--danger); }
+
+  /* ---------- modal ---------- */
+  .scrim { position: fixed; inset: 0; background: rgba(5,6,9,.7); display: none; place-items: center; z-index: 10; padding: 16px; }
+  .scrim.open { display: grid; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; width: min(480px, 100%); padding: 20px; }
+  .modal h2 { margin: 0 0 8px; font-size: 16px; }
+  .modal p { color: var(--muted); margin: 0 0 12px; }
+  .modal input {
+    width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--bg); font-family: var(--mono); margin-bottom: 14px;
+  }
+  .modal input:focus { outline: none; border-color: var(--warn); }
+  .modal .row { justify-content: flex-end; }
+
+  .toast {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    background: var(--surface-2); border: 1px solid var(--border); padding: 9px 16px; border-radius: 8px;
+    font-size: 13px; display: none; z-index: 20; max-width: min(90vw, 640px);
+  }
+  .toast.show { display: block; }
+  .toast.err { border-color: rgba(240,106,106,.6); color: #ffb4b4; }
+
+  @media (max-width: 1100px) {
+    body { overflow: auto; }
+    .app { grid-template-columns: 200px minmax(0, 1fr); }
+    aside { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--border); height: 70vh; }
+  }
+  @media (max-width: 700px) {
+    .app { grid-template-columns: minmax(0, 1fr); }
+    nav { border-right: 0; border-bottom: 1px solid var(--border); display: flex; overflow-x: auto; padding: 8px; gap: 4px; }
+    nav .group { display: none; }
+    nav button { width: auto; white-space: nowrap; }
+    main { padding: 18px 16px 40px; }
+    header { flex-wrap: wrap; padding: 10px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">qbx_migrate <small>control panel</small></div>
+  <div class="spacer"></div>
+  <span class="pill" id="localPill" hidden><span class="dot"></span><span>local job running</span></span>
+  <span class="pill" id="serverPill" title="FiveM server connection"><span class="dot"></span><span id="serverText">checking server…</span></span>
+</header>
+
+<div class="app">
+  <nav id="nav">
+    <div class="group">Setup</div>
+    <button data-go="start"><span class="num">i</span>Start here</button>
+    <button data-go="settings"><span class="num">⚙</span>Settings</button>
+    <div class="group">Migration</div>
+    <button data-go="audit"><span class="num">1</span>Code audit</button>
+    <button data-go="db"><span class="num">2</span>Database check</button>
+    <button data-go="qb"><span class="num">3a</span>QBCore ➜ Qbox</button>
+    <button data-go="esx"><span class="num">3b</span>ESX ➜ Qbox</button>
+    <button data-go="all"><span class="num">∑</span>Run everything</button>
+    <button data-go="identity"><span class="num">4</span>First logins</button>
+    <div class="group">Safety</div>
+    <button data-go="restore"><span class="num">↺</span>Restore &amp; rollback</button>
+    <button data-go="reports"><span class="num">≡</span>Reports</button>
+  </nav>
+
+  <main>
+    <!-- ================= START ================= -->
+    <section data-view="start">
+      <h1>Start here</h1>
+      <p class="lede">Everything you'd normally type into the server console or PowerShell, as buttons. Each step is a dry run first: it writes a report and changes nothing. Writing anything takes a second click and typing <code>apply</code>.</p>
+
+      <div class="note warn"><b>Use a copy.</b> Run this against a copy of your server and a copy of your database first, never the live one. Take a full <code>mysqldump</code> before you start; the kit's own backups are precise but a full dump survives anything.</div>
+
+      <div class="card">
+        <h3>Connect the panel to your server</h3>
+        <ol class="steps">
+          <li>Put <code>qbx_migrate</code> in your resources and add <code>ensure qbx_migrate</code> to <code>server.cfg</code> after <code>oxmysql</code> and <code>ox_lib</code>.</li>
+          <li>Start the server. On first start it writes <code>panel_token.txt</code> into the resource folder; this panel reads it from there automatically.</li>
+          <li>The pill in the top right turns green. If your server isn't on <code>127.0.0.1:30120</code>, change it in <a href="#settings">Settings</a>.</li>
+        </ol>
+        <div class="row" style="margin-top:12px">
+          <button class="btn" id="testConn">Test connection</button>
+          <span id="connResult" class="empty"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>The order</h3>
+        <ol class="steps">
+          <li><b>Code audit</b> — scans your resources folder. Read-only. Doesn't need the server running.</li>
+          <li><b>Database check</b> — tells you whether you're on the QBCore or the ESX path.</li>
+          <li><b>Migrate</b> — QBCore or ESX, step by step, or everything at once.</li>
+          <li><b>Swap resources</b> — remove qb-core / es_extended, install qbx_core and the ox stack (the audit report lists exactly which).</li>
+          <li><b>First logins</b> — leave qbx_migrate ensured; players' identifiers are fixed as they join.</li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ================= SETTINGS ================= -->
+    <section data-view="settings">
+      <h1>Settings</h1>
+      <p class="lede">Saved next to the panel in <code>panel/settings.json</code>.</p>
+      <div class="card">
+        <label class="field"><span>Resources folder (for the code audit)</span>
+          <input id="s_resourcesPath" placeholder="C:\FXServer\server-data\resources" spellcheck="false"></label>
+        <label class="field"><span>server.cfg (optional — flags <code>ensure qb-*</code> lines)</span>
+          <input id="s_serverCfg" placeholder="C:\FXServer\server-data\server.cfg" spellcheck="false"></label>
+        <label class="field"><span>Folders to skip (optional, comma separated)</span>
+          <input id="s_excludeDir" placeholder="[maps], [vehicles]" spellcheck="false"></label>
+        <label class="field"><span>FiveM server address</span>
+          <input id="s_fivemUrl" placeholder="http://127.0.0.1:30120" spellcheck="false"></label>
+        <label class="field"><span>Panel token</span>
+          <input id="s_token" placeholder="leave empty to read panel_token.txt" spellcheck="false">
+          <small id="tokenHint"></small></label>
+        <div class="row"><button class="btn primary" id="saveSettings">Save</button><span id="saveResult" class="empty"></span></div>
+      </div>
+      <div class="note info"><b>Server on another machine?</b> Copy the token out of <code>resources/…/qbx_migrate/panel_token.txt</code> on the server into the field above, and add <code>set qbx_migrate_panel_remote true</code> to its server.cfg. By default the server only answers this panel from the same machine.</div>
+    </section>
+
+    <!-- ================= AUDIT ================= -->
+    <section data-view="audit">
+      <h1>Code audit</h1>
+      <p class="lede">Scans every <code>.lua</code>, <code>fxmanifest</code> and <code>.cfg</code> in your resources folder for QBCore / ESX code that needs changing. Runs on this machine; the server doesn't need to be on.</p>
+      <div class="note" id="auditPath"></div>
+
+      <div class="card">
+        <h3>Audit <span class="tag ro">read-only</span></h3>
+        <p>Writes <code>MIGRATION_REPORT.md</code> and <code>findings.csv</code>. The <b>HIGH</b> section is your actual workload.</p>
+        <div class="row"><button class="btn primary" data-audit="dry">Run audit</button></div>
+      </div>
+
+      <div class="card">
+        <h3>Apply safe rewrites <span class="tag wr">writes files</span></h3>
+        <p>QBCore servers only. Mechanical mappings only (<code>exports['qb-core']</code> ➜ <code>qbx_core</code>, qb-target ➜ ox_target compat, string job grades, manifest dependencies). Every touched file is backed up and a restore script is generated.</p>
+        <div class="row">
+          <label class="check"><input type="checkbox" id="aggressive"> also medium-confidence rewrites (read a normal audit first)</label>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn" data-audit="dryagg">Preview</button>
+          <button class="btn apply" data-audit="apply">Apply rewrites…</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= DB CHECK ================= -->
+    <section data-view="db">
+      <h1>Database check</h1>
+      <p class="lede">Read-only looks at your database, run through the server. <b>Check</b> tells you which path you're on.</p>
+      <div id="dbSteps"></div>
+    </section>
+
+    <!-- ================= QB ================= -->
+    <section data-view="qb">
+      <h1>QBCore ➜ Qbox</h1>
+      <p class="lede">Run top to bottom. Dry run each, read the report, then apply.</p>
+      <div id="qbSteps1"></div>
+      <div class="divider">swap resources, restart with qbx_core + ox_inventory running</div>
+      <div class="note">Merge <code>output/items.lua</code> into <code>ox_inventory/data/items.lua</code> and <code>output/jobs.lua</code> / <code>gangs.lua</code> into <code>qbx_core/shared/</code> first. Then run <b>Database check</b> again: “Items NOT defined in ox_inventory” must be empty before you convert inventories.</div>
+      <div id="qbSteps2"></div>
+      <div class="note">Last: type <code>convertjobs</code> in the server console. That's qbx_core's own command; it fills <code>player_groups</code>.</div>
+    </section>
+
+    <!-- ================= ESX ================= -->
+    <section data-view="esx">
+      <h1>ESX ➜ Qbox</h1>
+      <p class="lede">The ESX step renames <code>users</code> ➜ <code>esx_users</code> (never drops it), creates the qbx tables and only ever adds rows. It's idempotent: re-running keeps every character's citizenid and refreshes the data.</p>
+      <div id="esxSteps"></div>
+      <div class="note">Then merge the generated files, swap resources, restart with qbx_core + ox_inventory, and dry run <b>Convert ESX database</b> again: “Items NOT defined in ox_inventory” must be empty. If it isn't, add the items and apply again.</div>
+      <div class="note">Undo everything this step did: <a href="#restore">Restore &amp; rollback</a> ➜ ESX rollback.</div>
+    </section>
+
+    <!-- ================= ALL ================= -->
+    <section data-view="all">
+      <h1>Run everything</h1>
+      <p class="lede">Every applicable step in order, one report. The ESX step is included automatically when an ESX <code>users</code> table is detected.</p>
+      <div id="allSteps"></div>
+    </section>
+
+    <!-- ================= IDENTITY ================= -->
+    <section data-view="identity">
+      <h1>First logins</h1>
+      <p class="lede">Qbox keys players by <code>license2:</code>, which can't be computed offline. qbx_migrate rewrites each player's rows as they connect. Keep it ensured until nothing is pending.</p>
+      <div id="identitySteps"></div>
+    </section>
+
+    <!-- ================= RESTORE ================= -->
+    <section data-view="restore">
+      <h1>Restore &amp; rollback</h1>
+      <p class="lede">Restores put <b>data</b> back, not schema: added columns and tables stay (they're harmless). A true point-in-time reset is what your own mysqldump is for.</p>
+
+      <div class="card">
+        <h3>Database backups <span class="cmd">qbxmigrate restore &lt;stamp&gt;</span></h3>
+        <p>Every write step makes one in <code>backups/</code>.</p>
+        <div id="backupList"></div>
+        <div class="row" style="margin-top:10px">
+          <label class="field" style="flex:1;margin:0"><input id="stampInput" placeholder="or type a stamp, e.g. 20260101_120000" spellcheck="false"></label>
+          <button class="btn" id="stampDry">Dry run</button>
+          <button class="btn apply" id="stampApply">Restore…</button>
+        </div>
+      </div>
+
+      <div id="rollbackSteps"></div>
+
+      <div class="card">
+        <h3>Code rewrites <span class="tag wr">writes files</span></h3>
+        <p>Puts back every file an <b>Apply rewrites</b> run changed.</p>
+        <div id="codeRestoreList"></div>
+      </div>
+    </section>
+
+    <!-- ================= REPORTS ================= -->
+    <section data-view="reports">
+      <h1>Reports</h1>
+      <p class="lede">Click one to open it on the right.</p>
+      <div class="card">
+        <h3>Database reports <span class="cmd">output/</span></h3>
+        <div id="reportList"></div>
+        <div class="row" style="margin-top:10px"><button class="btn small" data-open="output">Open folder</button></div>
+      </div>
+      <div class="card">
+        <h3>Code audits <span class="cmd">tools/qbx_migration_*</span></h3>
+        <div id="auditList"></div>
+      </div>
+    </section>
+  </main>
+
+  <aside>
+    <div class="tabs">
+      <button data-tab="console" class="active">Console</button>
+      <button data-tab="report">Report</button>
+    </div>
+    <div class="jobbar" id="jobbar"><span class="empty">No command run yet.</span></div>
+    <div class="pane" id="consolePane"><pre id="console"></pre><div class="placeholder" id="consoleEmpty">Output from whatever you run shows up here, live.</div></div>
+    <div class="pane" id="reportPane" hidden><div class="placeholder">Reports open here when a command finishes, or pick one under Reports.</div></div>
+  </aside>
+</div>
+
+<div class="scrim" id="scrim">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <h2 id="modalTitle"></h2>
+    <p id="modalBody"></p>
+    <p>Type <code>apply</code> to continue.</p>
+    <input id="modalInput" autocomplete="off" spellcheck="false">
+    <div class="row">
+      <button class="btn" id="modalCancel">Cancel</button>
+      <button class="btn apply" id="modalOk" disabled>Apply</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+async function api(path, body) {
+  const r = await fetch(path, {
+    method: body ? 'POST' : 'GET',
+    headers: { 'X-Qbxm-Panel': '1', 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await r.text();
+  let data = text;
+  try { data = JSON.parse(text); } catch { /* markdown or plain text */ }
+  if (!r.ok) {
+    const err = new Error((data && data.error) || text || ('HTTP ' + r.status));
+    err.data = data; err.status = r.status;
+    throw err;
+  }
+  return data;
+}
+
+let toastTimer;
+function toast(msg, isErr) {
+  const t = $('#toast');
+  t.textContent = msg; t.className = 'toast show' + (isErr ? ' err' : '');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.className = 'toast'), isErr ? 6000 : 3000);
+}
+
+/* ------------------------------------------------------------------ steps */
+
+const STEPS = {
+  db: [
+    { cmd: 'inspect', title: 'Inspect database', ro: true, desc: 'Lists the tables and inventory blobs you actually have, with a real sample row from each.' },
+    { cmd: 'check', title: 'Pre-flight check', ro: true, desc: 'Environment, schema, jobs, inventory formats. Tells you whether you are on the QBCore or the ESX path.' },
+    { cmd: 'backup', title: 'Back up now', once: 'Create backup', desc: 'Snapshots every table this tool can touch into backups/<stamp>. Write steps back up by themselves too; this is for peace of mind.' },
+  ],
+  qbSteps1: [
+    { cmd: 'schema', title: 'Schema', desc: 'Additive only: adds the columns and tables Qbox needs. Nothing is dropped.' },
+    { cmd: 'items', title: 'Items', desc: 'Generates output/items.lua from qb-core\'s shared items, to merge into ox_inventory/data/items.lua.' },
+    { cmd: 'jobs', title: 'Jobs & gangs', desc: 'Generates output/jobs.lua and gangs.lua for qbx_core/shared/.' },
+  ],
+  qbSteps2: [
+    { cmd: 'inventory', title: 'Inventories', desc: 'Converts player, stash, trunk and glovebox inventories to ox_inventory format. Backs up first. Already-converted blobs are skipped.' },
+    { cmd: 'phone', title: 'Phone numbers', desc: 'Backfills players.phone_number from charinfo.' },
+    { cmd: 'metadata', title: 'Metadata', desc: 'Adds missing qbx metadata keys with defaults. Additive only.' },
+  ],
+  esxSteps: [
+    { cmd: 'esx', title: 'Convert ESX database', desc: 'Dry run lists identifier shapes, unresolved vehicles, orphan vehicles, undefined items and stash renames. Apply backs up, renames users ➜ esx_users, creates the qbx tables and converts everything.' },
+    { cmd: 'items', title: 'Items', desc: 'Generates output/items.lua from the ESX items table.' },
+    { cmd: 'jobs', title: 'Jobs', desc: 'Generates output/jobs.lua from jobs + job_grades.' },
+  ],
+  allSteps: [
+    { cmd: 'all', title: 'Everything', desc: 'Dry run: inspect + check + every step, one report. Apply: backup, then [esx] + schema + items + jobs + inventory + phone + metadata.' },
+  ],
+  identitySteps: [
+    { cmd: 'identity', title: 'Pending identifiers', ro: true, desc: 'Rows still on a pre-Qbox identifier — players who haven\'t logged in since the migration.' },
+  ],
+  rollbackSteps: [
+    { cmd: 'esx', arg: 'rollback', title: 'ESX rollback', desc: 'Deletes exactly the rows the ESX step inserted, reverses the ox_inventory owner rewrites, and renames esx_users back to users.' },
+  ],
+};
+
+function stepCard(s) {
+  const base = ['qbxmigrate', s.cmd, s.arg].filter(Boolean).join(' ');
+  const tag = s.ro ? '<span class="tag ro">read-only</span>' : (s.once ? '' : '<span class="tag wr">dry run first</span>');
+  let buttons;
+  if (s.ro) buttons = `<button class="btn primary" data-run="${s.cmd}">Run</button>`;
+  else if (s.once) buttons = `<button class="btn primary" data-run="${s.cmd}">${esc(s.once)}</button>`;
+  else buttons = `<button class="btn" data-run="${s.cmd}" data-arg="${s.arg || ''}">Dry run</button>
+                  <button class="btn apply" data-run="${s.cmd}" data-arg="${s.arg || ''}" data-apply="1" data-title="${esc(s.title)}">Apply…</button>`;
+  return `<div class="card"><h3>${esc(s.title)} <span class="cmd">${esc(base)}</span> ${tag}</h3>
+    <p>${esc(s.desc)}</p><div class="row">${buttons}</div></div>`;
+}
+
+for (const [id, list] of Object.entries(STEPS)) {
+  const el = document.getElementById(id === 'db' ? 'dbSteps' : id);
+  el.innerHTML = list.map(stepCard).join('');
+}
+
+/* ------------------------------------------------------------------ navigation */
+
+function go(view) {
+  if (!$(`section[data-view="${view}"]`)) view = 'start';
+  $$('section[data-view]').forEach((s) => s.classList.toggle('shown', s.dataset.view === view));
+  $$('nav button').forEach((b) => b.classList.toggle('active', b.dataset.go === view));
+  if (location.hash !== '#' + view) history.replaceState(null, '', '#' + view);
+  if (['reports', 'restore', 'settings', 'audit'].includes(view)) loadState();
+}
+$('#nav').addEventListener('click', (e) => { const b = e.target.closest('button[data-go]'); if (b) go(b.dataset.go); });
+window.addEventListener('hashchange', () => go(location.hash.slice(1)));
+
+function showTab(tab) {
+  $$('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+  $('#consolePane').hidden = tab !== 'console';
+  $('#reportPane').hidden = tab !== 'report';
+}
+$('.tabs').addEventListener('click', (e) => { const b = e.target.closest('button[data-tab]'); if (b) showTab(b.dataset.tab); });
+
+/* ------------------------------------------------------------------ confirm */
+
+function confirmApply(title, body) {
+  return new Promise((resolve) => {
+    $('#modalTitle').textContent = title;
+    $('#modalBody').textContent = body;
+    const input = $('#modalInput'), ok = $('#modalOk');
+    input.value = ''; ok.disabled = true;
+    $('#scrim').classList.add('open');
+    setTimeout(() => input.focus(), 0);
+    const done = (v) => {
+      $('#scrim').classList.remove('open');
+      input.oninput = ok.onclick = $('#modalCancel').onclick = input.onkeydown = null;
+      resolve(v);
+    };
+    input.oninput = () => (ok.disabled = input.value.trim().toLowerCase() !== 'apply');
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter' && !ok.disabled) done(true);
+      if (e.key === 'Escape') done(false);
+    };
+    ok.onclick = () => done(true);
+    $('#modalCancel').onclick = () => done(false);
+  });
+}
+
+/* ------------------------------------------------------------------ output */
+
+const out = { kind: null, id: null, from: 0, timer: null };
+
+function lineClass(l) {
+  if (/FAILED|\*\*ERROR\*\*|\bERROR\b|\[stderr\]/.test(l)) return 'e';
+  if (/\*\*WARN\*\*|\bWARN\b|WARNING/.test(l)) return 'w';
+  if (/=== .* ===|^\s*qbxmigrate |DRY RUN/.test(l)) return 'h';
+  if (/\bOK\b|fixed |restored |Restore complete/.test(l)) return 'k';
+  if (/report written|report ->|csv\s+->/.test(l)) return 'd';
+  return '';
+}
+function appendLines(lines) {
+  if (!lines || !lines.length) return;
+  const pane = $('#consolePane');
+  const stick = pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 30;
+  const frag = document.createDocumentFragment();
+  for (const l of lines) {
+    const span = document.createElement('span');
+    const c = lineClass(l); if (c) span.className = c;
+    span.textContent = l.replace(/^\[qbx_migrate\] /, '') + '\n';
+    frag.appendChild(span);
+  }
+  $('#console').appendChild(frag);
+  $('#consoleEmpty').hidden = true;
+  if (stick) pane.scrollTop = pane.scrollHeight;
+}
+function setJobbar(title, status, extra = '') {
+  $('#jobbar').innerHTML = `<span class="status ${esc(status)}">${esc(status)}</span>
+    <span class="title" title="${esc(title)}">${esc(title)}</span><span class="spacer"></span>${extra}`;
+}
+function setBusy(b) {
+  $$('[data-run],[data-audit],#stampDry,#stampApply,[data-coderestore]').forEach((el) => (el.disabled = b));
+}
+
+function startWatching(kind, id, title) {
+  clearTimeout(out.timer);
+  Object.assign(out, { kind, id, from: 0 });
+  $('#console').textContent = '';
+  $('#consoleEmpty').hidden = false;
+  setJobbar(title, 'running');
+  showTab('console');
+  setBusy(true);
+  poll();
+}
+
+async function poll() {
+  const { kind, id } = out;
+  try {
+    const j = kind === 'server'
+      ? await api(`/api/server/job?id=${id}&from=${out.from}`)
+      : await api(`/api/local/job?from=${out.from}`);
+    if (kind !== out.kind || id !== out.id) return;
+    appendLines(j.lines); out.from = j.next;
+    const title = j.command || j.title || '';
+    if (j.status === 'running') {
+      setJobbar(title, 'running');
+      out.timer = setTimeout(poll, 600);
+      return;
+    }
+    const extra = j.reportFolder ? `<button class="btn small" data-open="audit" data-name="${esc(j.reportFolder)}">Open folder</button>` : '';
+    setJobbar(title, j.status, extra);
+    if (j.error) appendLines(['FAILED: ' + j.error]);
+    setBusy(false);
+    if (j.report) showReport(j.report, j.reportFile || 'MIGRATION_REPORT.md');
+    loadState(); refreshServer();
+  } catch (e) {
+    if (e.status === 404 && kind === 'server') {
+      setJobbar('lost track of the job (server restarted?)', 'failed'); setBusy(false); return;
+    }
+    out.timer = setTimeout(poll, 2000);
+  }
+}
+
+async function runServer(command, arg2, arg3) {
+  try {
+    const r = await api('/api/server/run', { command, arg2: arg2 || '', arg3: arg3 || '' });
+    startWatching('server', r.id, ['qbxmigrate', command, arg2, arg3].filter(Boolean).join(' '));
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ------------------------------------------------------------------ markdown */
+
+function inline(s) {
+  const codes = [];
+  s = s.replace(/`([^`]+)`/g, (_, c) => { codes.push(c); return '\u0000' + (codes.length - 1) + '\u0000'; });
+  s = esc(s)
+    .replace(/\*\*WARN\*\*/g, '<strong class="warn-word">WARN</strong>')
+    .replace(/\*\*ERROR\*\*/g, '<strong class="err-word">ERROR</strong>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => '<code>' + esc(codes[+i]) + '</code>');
+}
+function splitRow(l) {
+  return l.trim().replace(/^\||\|$/g, '').split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|'));
+}
+function renderMarkdown(md) {
+  const lines = md.replace(/\r/g, '').split('\n');
+  let html = '', i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    if (/^```/.test(l)) {
+      const buf = []; i++;
+      while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]);
+      i++; html += `<pre><code>${esc(buf.join('\n'))}</code></pre>`; continue;
+    }
+    const h = l.match(/^(#{1,4})\s+(.*)/);
+    if (h) { const n = Math.min(h[1].length, 3); html += `<h${n}>${inline(h[2])}</h${n}>`; i++; continue; }
+    if (/^\s*\|/.test(l) && i + 1 < lines.length && /^\s*\|?\s*:?-{2,}/.test(lines[i + 1])) {
+      const head = splitRow(l); i += 2;
+      let t = '<div class="tbl"><table><thead><tr>' + head.map((c) => `<th>${inline(c)}</th>`).join('') + '</tr></thead><tbody>';
+      while (i < lines.length && /^\s*\|/.test(lines[i])) t += '<tr>' + splitRow(lines[i++]).map((c) => `<td>${inline(c)}</td>`).join('') + '</tr>';
+      html += t + '</tbody></table></div>'; continue;
+    }
+    if (/^\s*([-*]|\d+\.)\s+/.test(l)) {
+      const ordered = /^\s*\d+\./.test(l);
+      let t = ordered ? '<ol>' : '<ul>';
+      while (i < lines.length && /^\s*([-*]|\d+\.)\s+/.test(lines[i])) t += `<li>${inline(lines[i++].replace(/^\s*([-*]|\d+\.)\s+/, ''))}</li>`;
+      html += t + (ordered ? '</ol>' : '</ul>'); continue;
+    }
+    if (!l.trim()) { i++; continue; }
+    const buf = [];
+    while (i < lines.length && lines[i].trim() && !/^(#{1,4}\s|```|\s*\||\s*([-*]|\d+\.)\s)/.test(lines[i])) buf.push(lines[i++]);
+    if (!buf.length) buf.push(lines[i++]);
+    html += `<p>${buf.map(inline).join('<br>')}</p>`;
+  }
+  return html;
+}
+
+function showReport(md, name) {
+  const big = md.length > 1_500_000;
+  $('#reportPane').innerHTML = `<div class="jobbar"><span class="title">${esc(name)}</span></div>
+    ${big ? `<pre class="md" style="white-space:pre-wrap">${esc(md)}</pre>` : `<div class="md">${renderMarkdown(md)}</div>`}`;
+  $('#reportPane').scrollTop = 0;
+  showTab('report');
+}
+
+/* ------------------------------------------------------------------ actions */
+
+document.addEventListener('click', async (e) => {
+  const run = e.target.closest('[data-run]');
+  if (run && !run.disabled) {
+    const cmd = run.dataset.run, arg = run.dataset.arg || '';
+    if (run.dataset.apply) {
+      const label = ['qbxmigrate', cmd, arg, 'apply'].filter(Boolean).join(' ');
+      const ok = await confirmApply(`${run.dataset.title}: apply`, `This runs "${label}" and writes to your database. A backup is taken first where the step supports it.`);
+      if (!ok) return;
+      return arg ? runServer(cmd, arg, 'apply') : runServer(cmd, 'apply');
+    }
+    return runServer(cmd, arg);
+  }
+
+  const audit = e.target.closest('[data-audit]');
+  if (audit && !audit.disabled) {
+    const mode = audit.dataset.audit;
+    const aggressive = $('#aggressive').checked;
+    if (mode === 'apply') {
+      const ok = await confirmApply('Apply code rewrites', `This rewrites files under your resources folder${aggressive ? ', including medium-confidence rewrites' : ''}. Every file is backed up first and a Restore-Backup.ps1 is generated.`);
+      if (!ok) return;
+    }
+    try {
+      const r = await api('/api/audit', { apply: mode === 'apply', aggressive: mode !== 'dry' && aggressive });
+      startWatching('local', r.id, mode === 'apply' ? 'Code rewrite (apply)' : 'Code audit');
+    } catch (err) { toast(err.message, true); }
+    return;
+  }
+
+  const rep = e.target.closest('[data-report]');
+  if (rep) {
+    try { showReport(await api(`/api/file?kind=${rep.dataset.kind}&name=${encodeURIComponent(rep.dataset.report)}`), rep.dataset.report); }
+    catch (err) { toast(err.message, true); }
+    return;
+  }
+
+  const open = e.target.closest('[data-open]');
+  if (open) { api('/api/open', { kind: open.dataset.open, name: open.dataset.name || '' }).catch((err) => toast(err.message, true)); return; }
+
+  const stamp = e.target.closest('[data-stamp]');
+  if (stamp) { $('#stampInput').value = stamp.dataset.stamp; return; }
+
+  const cr = e.target.closest('[data-coderestore]');
+  if (cr && !cr.disabled) {
+    const ok = await confirmApply('Restore code', `This copies every file backed up by ${cr.dataset.coderestore} back over your resources folder.`);
+    if (!ok) return;
+    try {
+      const r = await api('/api/audit/restore', { name: cr.dataset.coderestore });
+      startWatching('local', r.id, 'Restore code');
+    } catch (err) { toast(err.message, true); }
+  }
+});
+
+function stampValue() {
+  const v = $('#stampInput').value.trim();
+  if (!/^[\w-]+$/.test(v)) { toast('Pick a backup or type its stamp first.', true); return null; }
+  return v;
+}
+$('#stampDry').onclick = () => { const v = stampValue(); if (v) runServer('restore', v); };
+$('#stampApply').onclick = async () => {
+  const v = stampValue(); if (!v) return;
+  if (await confirmApply('Restore database backup', `This overwrites the backed-up tables with the contents of backups/${v}.`)) runServer('restore', v, 'apply');
+};
+
+/* ------------------------------------------------------------------ state */
+
+const SETTING_KEYS = ['resourcesPath', 'serverCfg', 'excludeDir', 'fivemUrl', 'token'];
+
+async function loadState() {
+  let st;
+  try { st = await api('/api/state'); } catch (e) { toast('Panel backend not responding: ' + e.message, true); return; }
+  const active = document.activeElement;
+  for (const k of SETTING_KEYS) { const el = $('#s_' + k); if (el !== active) el.value = st.settings[k] || ''; }
+  $('#tokenHint').textContent = st.settings.token ? 'Using the token above.'
+    : st.tokenFile ? 'Found panel_token.txt — using it.' : 'No panel_token.txt yet. Start the server with qbx_migrate once and it appears.';
+  $('#auditPath').innerHTML = st.settings.resourcesPath
+    ? `Scanning <code>${esc(st.settings.resourcesPath)}</code>${st.settings.serverCfg ? ` and <code>${esc(st.settings.serverCfg)}</code>` : ''}. <a href="#settings">Change</a>`
+    : `<b>Set your resources folder first</b> in <a href="#settings">Settings</a>.`;
+
+  const rows = (list, fn, emptyText) => list.length ? `<table class="list">${list.map(fn).join('')}</table>` : `<div class="empty">${emptyText}</div>`;
+  $('#reportList').innerHTML = rows(st.reports, (r) => `<tr><td class="name">${esc(r.name)}</td><td class="t">${esc(r.time)}</td>
+    <td class="a"><button class="btn small" data-report="${esc(r.name)}" data-kind="report">Open</button></td></tr>`, 'No reports yet. Run any step.');
+  $('#auditList').innerHTML = rows(st.audits, (a) => `<tr><td class="name">${esc(a.name)}</td><td class="t">${esc(a.time)}</td>
+    <td class="a">${a.hasReport ? `<button class="btn small" data-report="${esc(a.name)}" data-kind="audit">Open</button>` : ''}
+    <button class="btn small" data-open="audit" data-name="${esc(a.name)}">Folder</button></td></tr>`, 'No code audits yet.');
+  $('#backupList').innerHTML = rows(st.backups, (b) => `<tr><td class="name">${esc(b.name)}</td><td class="t">${esc(b.time)}</td>
+    <td class="a"><button class="btn small" data-stamp="${esc(b.name)}">Select</button></td></tr>`, 'No backups in this folder. (If the server runs on another machine, type the stamp below.)');
+  const restorable = st.audits.filter((a) => a.hasRestore);
+  $('#codeRestoreList').innerHTML = rows(restorable, (a) => `<tr><td class="name">${esc(a.name)}</td><td class="t">${esc(a.time)}</td>
+    <td class="a"><button class="btn small danger" data-coderestore="${esc(a.name)}">Restore…</button></td></tr>`, 'No applied rewrites to undo.');
+}
+
+$('#saveSettings').onclick = async () => {
+  const body = {};
+  for (const k of SETTING_KEYS) body[k] = $('#s_' + k).value;
+  try {
+    await api('/api/settings', body);
+    $('#saveResult').textContent = 'Saved.';
+    setTimeout(() => ($('#saveResult').textContent = ''), 2500);
+    loadState(); refreshServer();
+  } catch (e) { toast(e.message, true); }
+};
+
+let serverBusy = false, localBusy = false;
+const isWatching = () => $('#jobbar .status.running') !== null;
+
+async function refreshServer() {
+  const pill = $('#serverPill'), text = $('#serverText');
+  try {
+    const st = await api('/api/server/status');
+    serverBusy = !!st.busy;
+    pill.className = 'pill ' + (st.busy ? 'busy' : 'on');
+    text.textContent = (st.busy ? 'server busy' : 'server connected') + (st.esx ? ' · ESX database' : '');
+    // Pick up a job started elsewhere (another tab, or before a reload).
+    const running = (st.jobs || []).find((j) => j.status === 'running');
+    if (running && !(out.kind === 'server' && out.id === running.id)) startWatching('server', running.id, running.command);
+    return st;
+  } catch (e) {
+    serverBusy = false;
+    pill.className = 'pill off';
+    text.textContent = e.status === 401 ? 'token rejected' : e.status === 403 ? 'server refused (not loopback)' : 'server offline';
+    pill.title = e.message;
+    throw e;
+  }
+}
+
+$('#testConn').onclick = async () => {
+  const r = $('#connResult');
+  r.textContent = 'Checking…';
+  try {
+    const st = await refreshServer();
+    r.innerHTML = `<span style="color:var(--ok)">Connected to <code>${esc(st.resource)}</code>${st.version ? ' ' + esc(st.version) : ''}.</span>`;
+  } catch (e) { r.innerHTML = `<span style="color:var(--danger)">${esc(e.message)}</span>`; }
+};
+
+async function attachLocal() {
+  try {
+    const j = await api('/api/local/job?from=0');
+    localBusy = j.status === 'running';
+    $('#localPill').hidden = !localBusy;
+    if (localBusy && out.kind !== 'local') startWatching('local', j.id, j.title);
+  } catch { /* backend down: loadState reports it */ }
+}
+
+go(location.hash.slice(1) || 'start');
+loadState();
+attachLocal();
+refreshServer().catch(() => {});
+setInterval(() => { refreshServer().catch(() => {}); attachLocal(); }, 4000);
+</script>
+</body>
+</html>

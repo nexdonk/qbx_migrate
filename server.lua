@@ -1986,7 +1986,7 @@ local running = false
 local function run(action, arg2, arg3)
     if running then
         print('[qbx_migrate] a migration is already running, wait for it to finish')
-        return
+        return false, 'busy'
     end
     running = true
 
@@ -2083,7 +2083,12 @@ local function run(action, arg2, arg3)
     if not ok then
         print(('[qbx_migrate] FAILED: %s'):format(tostring(err)))
     end
+    return ok, err
 end
+
+-- For server/panel.lua: runs a command to completion in the calling thread.
+QBXM.run = run
+QBXM.isRunning = function() return running end
 
 RegisterCommand('qbxmigrate', function(source, args)
     if source ~= 0 then

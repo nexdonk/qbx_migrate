@@ -118,3 +118,18 @@ function RUN_CONNECT(src)
     end
     return done
 end
+
+-- HTTP bridge (server/panel.lua). HTTP_REQUEST drives the registered handler.
+function SetHttpHandler(fn) HTTP_HANDLER = fn end
+function GetResourceMetadata() return 'test' end
+function HTTP_REQUEST(method, path, headers, address, body)
+    local out = {}
+    local req = { method = method, path = path, headers = headers or {}, address = address or '127.0.0.1:50000' }
+    function req.setDataHandler(cb) cb(body or '') end
+    local res = {
+        writeHead = function(code) out.code = code end,
+        send = function(data) out.body = data end,
+    }
+    HTTP_HANDLER(req, res)
+    return out.code, out.body and json.decode(out.body)
+end

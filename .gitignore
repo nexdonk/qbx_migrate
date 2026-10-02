@@ -4,3 +4,6 @@ output/*
 !output/.gitkeep
 backups/*
 !backups/.gitkeep
+panel_token.txt
+panel/settings.json
+tools/qbx_migration_*/

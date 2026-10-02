@@ -3,10 +3,11 @@
   "private": true,
   "description": "Runs qbx_migrate's server Lua under fengari against a throwaway MariaDB with FiveM/oxmysql shims.",
   "scripts": {
-    "syntax": "node check.js ../server.lua ../server/esx.lua ../server/identity.lua ../data/vehicle_models.lua",
+    "syntax": "node check.js ../server.lua ../server/esx.lua ../server/identity.lua ../server/panel.lua ../data/vehicle_models.lua",
     "test:esx": "node test_esx.js",
     "test:qb": "node test_qb.js",
-    "test": "npm run syntax && npm run test:esx && npm run test:qb"
+    "test:panel": "node test_panel.js",
+    "test": "npm run syntax && npm run test:esx && npm run test:qb && npm run test:panel"
   },
   "dependencies": {
     "fengari": "0.1.4",
